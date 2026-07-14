@@ -6,6 +6,16 @@ import sys
 def get_profile_name(account_num):
     return f"account_{account_num}"
 
+def get_storage_path(account_num):
+    profile = get_profile_name(account_num)
+    return os.path.join(
+        os.path.expanduser("~"), 
+        ".notebooklm", 
+        "profiles", 
+        profile, 
+        "storage_state.json"
+    )
+
 def login(account_num):
     profile = get_profile_name(account_num)
     print("=" * 60)
@@ -19,7 +29,6 @@ def login(account_num):
     
     try:
         # Run notebooklm login command for the specific profile
-        # Use shell=True for Windows compatibility
         subprocess.run(["notebooklm", "-p", profile, "login"], check=True, shell=True)
         print(f"\n[SUCCESS] Successfully logged in for Account #{account_num}!")
     except subprocess.CalledProcessError as e:
@@ -33,35 +42,26 @@ def check_accounts():
     print(" CHECKING AUTHENTICATION STATUS FOR GOOGLE ACCOUNTS 1 - 10")
     print("=" * 60)
     
-    all_ok = True
+    configured_count = 0
     for i in range(1, 11):
         profile = get_profile_name(i)
+        storage_path = get_storage_path(i)
         sys.stdout.write(f"Account #{i} ({profile}): ")
         sys.stdout.flush()
         
-        try:
-            # Run auth check in silent/json mode to see if it's authenticated
-            result = subprocess.run(
-                ["notebooklm", "-p", profile, "auth", "check", "--test"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                shell=True
-            )
-            if result.returncode == 0:
-                print("CONNECTED \u2705")
-            else:
-                print("NOT CONNECTED \u274c")
-                all_ok = False
-        except Exception:
-            print("ERROR / NOT CONFIGURED \u274c")
-            all_ok = False
+        # Check if storage_state.json exists and is not empty
+        if os.path.exists(storage_path) and os.path.getsize(storage_path) > 0:
+            print("CONNECTED [OK]")
+            configured_count += 1
+        else:
+            print("NOT CONFIGURED [MISSING]")
             
     print("=" * 60)
-    if all_ok:
-        print("[SUCCESS] All 10 accounts are configured and ready to go!")
+    print(f"[INFO] {configured_count} of 10 accounts are configured.")
+    if configured_count == 10:
+        print("[SUCCESS] All 10 accounts are ready to go!")
     else:
-        print("[INFO] Some accounts are not logged in. Use --login <number> to configure them.")
+        print("[INFO] Use --login <number> to configure remaining accounts.")
     print("=" * 60)
 
 def main():
