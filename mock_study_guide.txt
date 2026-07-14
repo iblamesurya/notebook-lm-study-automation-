@@ -1,0 +1,6 @@
+Quantum Computing Study Guide
+Quantum computing is a rapidly-emerging technology that harnesses the laws of quantum mechanics to solve problems too complex for classical computers.
+Today, IBM, Google, and other companies are building quantum hardware that can be programmed for various experimental and educational use cases.
+The basic unit of quantum information is the qubit. Unlike a classical bit, which can only be 0 or 1, a qubit can exist in a superposition of states.
+This allows quantum computers to process massive amounts of possibilities simultaneously.
+Another key concept is quantum entanglement, which enables qubits that are entangled to share information instantaneously regardless of distance.

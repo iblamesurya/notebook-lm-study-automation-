@@ -1,0 +1,5 @@
+Notebook Name,Material Path,Video Prompt,Slides Prompt
+Introduction to Machine Learning,C:/path/to/your/study/material/folder_or_file1.pdf,"Explain the history of ML, its main subfields (supervised, unsupervised, reinforcement), and its everyday applications.",Create slides outlining ML subfields with clear definitions.
+Linear Regression Basics,C:/path/to/your/study/material/folder_or_file2.docx,,
+Deep Learning Deep Dive,C:/path/to/your/study/material/folder_or_file3.txt,"Focus on explaining backpropagation and multi-layer perceptrons with clear, step-by-step mathematical logic.",Structure slides to explain forward and backward passes visually.
+Natural Language Processing Overview,C:/path/to/your/study/material/folder_or_file4.pptx,,
