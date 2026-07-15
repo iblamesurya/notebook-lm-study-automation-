@@ -3,6 +3,7 @@ import sys
 import asyncio
 import argparse
 import time
+import tempfile
 from notebooklm import NotebookLMClient
 from notebooklm.rpc import VideoFormat, SlideDeckFormat, QuizQuantity, QuizDifficulty
 from input_processor import process_input_file
@@ -151,10 +152,10 @@ async def process_task(client: NotebookLMClient, task: dict, output_dir: str):
     )
     print("      Video overview downloaded!")
     
-    print(f"[SUCCESS] Completed all operations for notebook: {notebook_name}\n")
+    print(f"[SUCCESS] Completed NotebookLM operations for notebook: {notebook_name}\n")
 
 
-async def main_async(spreadsheet_path: str, start_account: int, dry_run: bool, output_dir: str):
+async def main_async(spreadsheet_path: str, start_account: int, dry_run: bool, colab: bool, output_dir_override: str, headless: bool):
     # 1. Parse Excel/CSV to load tasks
     print(f"[INFO] Loading spreadsheet: {spreadsheet_path}")
     try:
@@ -194,6 +195,17 @@ async def main_async(spreadsheet_path: str, start_account: int, dry_run: bool, o
         profile = task['profile_name']
         profile_tasks.setdefault(profile, []).append(task)
         
+    # Check if we are running in Google Colab
+    is_colab = colab or spreadsheet_path.startswith('/content/') or (output_dir_override and output_dir_override.startswith('/content/'))
+    
+    if is_colab:
+        print("[INFO] Running in Google Colab / Cloud Mode.")
+        if not output_dir_override:
+            output_dir_override = "/content/drive/MyDrive/NotebookLM_Syllabus/outputs"
+        print(f"[INFO] All outputs will be saved directly to your Google Drive path: {output_dir_override}")
+    else:
+        print(f"[INFO] Running in Local Temporary Storage Mode (Headless: {headless}).")
+        
     # Execute tasks profile by profile
     print("\n" + "=" * 60)
     print(" STARTING LIFECYCLE EXECUTION")
@@ -204,12 +216,75 @@ async def main_async(spreadsheet_path: str, start_account: int, dry_run: bool, o
         
         # We process one task at a time for safety and to avoid rate limits
         for task in tasks_list:
+            notebook_name = task['notebook_name']
+            
             try:
-                # Instantiate client and open session for this profile
-                async with NotebookLMClient.from_storage(profile=profile_name) as client:
-                    await process_task(client, task, output_dir)
+                if is_colab:
+                    # In Google Colab, we write files directly to Google Drive target path
+                    notebook_output_dir = os.path.join(output_dir_override, notebook_name.replace(":", "_").replace("/", "_"))
+                    os.makedirs(notebook_output_dir, exist_ok=True)
+                    
+                    async with NotebookLMClient.from_storage(profile=profile_name) as client:
+                        await process_task(client, task, output_dir_override)
+                        
+                    slides_path = os.path.join(notebook_output_dir, f"{notebook_name}_slides.pptx")
+                    quiz_path = os.path.join(notebook_output_dir, f"{notebook_name}_quiz.md")
+                    flashcards_path = os.path.join(notebook_output_dir, f"{notebook_name}_flashcards.md")
+                    video_path = os.path.join(notebook_output_dir, f"{notebook_name}_overview.mp4")
+                    
+                    files_to_compress = [slides_path, quiz_path, flashcards_path, video_path]
+                    files_to_compress = [f for f in files_to_compress if os.path.exists(f)]
+                    
+                    if files_to_compress:
+                        zip_file_path = os.path.join(output_dir_override, f"{notebook_name}.zip")
+                        import zipfile
+                        print(f"[INFO] Creating zip archive locally at '{zip_file_path}'...")
+                        with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                            for f in files_to_compress:
+                                zipf.write(f, os.path.basename(f))
+                        print(f"[SUCCESS] Zip archive created successfully!")
+                    
+                    print(f"[SUCCESS] All files for '{notebook_name}' written directly to Google Drive. Local copy is completely clean.")
+                    
+                else:
+                    # Local mode: downloads, zips, uploads via Playwright, and deletes local temp folder
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        print(f"[INFO] Created local temporary download directory: {temp_dir}")
+                        
+                        async with NotebookLMClient.from_storage(profile=profile_name) as client:
+                            await process_task(client, task, temp_dir)
+                        
+                        notebook_temp_dir = os.path.join(temp_dir, notebook_name.replace(":", "_").replace("/", "_"))
+                        
+                        slides_path = os.path.join(notebook_temp_dir, f"{notebook_name}_slides.pptx")
+                        quiz_path = os.path.join(notebook_temp_dir, f"{notebook_name}_quiz.md")
+                        flashcards_path = os.path.join(notebook_temp_dir, f"{notebook_name}_flashcards.md")
+                        video_path = os.path.join(notebook_temp_dir, f"{notebook_name}_overview.mp4")
+                        
+                        files_to_upload = [slides_path, quiz_path, flashcards_path, video_path]
+                        files_to_upload = [f for f in files_to_upload if os.path.exists(f)]
+                        
+                        if files_to_upload:
+                            zip_file_path = os.path.join(temp_dir, f"{notebook_name}.zip")
+                            
+                            from gdrive_uploader import compress_files_to_zip, upload_to_gdrive_headless
+                            compress_files_to_zip(files_to_upload, zip_file_path)
+                            
+                            files_to_upload.append(zip_file_path)
+                            
+                            print(f"[GDrive] Uploading folder files + zip for '{notebook_name}' to Google Drive...")
+                            success = await upload_to_gdrive_headless(profile_name, notebook_name, files_to_upload, headless=headless)
+                            if success:
+                                print(f"[GDrive SUCCESS] Uploaded to Google Drive successfully!")
+                            else:
+                                print(f"[GDrive WARNING] Google Drive upload timed out or failed.")
+                        else:
+                            print(f"[WARNING] No files found in '{notebook_temp_dir}' to zip or upload.")
+                            
+                    print(f"[CLEANUP] Deleted temporary folder: {temp_dir}. Local disk remains completely clean!")
+                    
             except Exception as e:
-                print(f"\n[ERROR] Task failed: '{task['notebook_name']}' under {profile_name}. Skipping to next task.")
+                print(f"\n[ERROR] Task failed: '{notebook_name}' under {profile_name}. Skipping to next task.")
                 print(f"        Reason: {e}\n")
                 
             # Sleep 10s between notebooks to let sessions cool down
@@ -221,12 +296,14 @@ def main():
     parser.add_argument("--start-account", type=int, choices=range(1, 11), default=1,
                         help="Google Account number (1-10) to start processing from (default: 1)")
     parser.add_argument("--dry-run", action="store_true", help="Parse Excel and show planned tasks without executing")
-    parser.add_argument("--output-dir", default="outputs", help="Directory to save downloaded files (default: outputs)")
+    parser.add_argument("--colab", action="store_true", help="Force Google Colab Cloud Mode")
+    parser.add_argument("--output-dir", default="", help="Custom output directory (defaults to Google Drive when in Colab)")
+    parser.add_argument("--headless", action="store_true", help="Run browser upload in headless mode (no window pops up)")
     
     args = parser.parse_args()
     
     # Run the async loop using Python 3.12+ recommended way
-    asyncio.run(main_async(args.spreadsheet, args.start_account, args.dry_run, args.output_dir))
+    asyncio.run(main_async(args.spreadsheet, args.start_account, args.dry_run, args.colab, args.output_dir, args.headless))
 
 if __name__ == "__main__":
     main()
